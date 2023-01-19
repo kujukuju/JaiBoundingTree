@@ -1,95 +1,89 @@
-#import "Math";
-#import "Basic";
 
-min :: (a: Vector3, b: Vector3) -> Vector3 {
-    vector: Vector3 = ---;
-    vector.x = min(a.x, b.x);
-    vector.y = min(a.y, b.y);
-    vector.z = min(a.z, b.z);
-    return vector;
+BoundingTree :: struct (T: Type) {
+    root_index: int = NULL_NODE;
+
+    nodes: [] Node(T) = ---;
+    node_count: int;
+    node_capacity: int = 16;
+
+    free_list: int;
+
+    insertion_count: int;
 }
 
-max :: (a: Vector3, b: Vector3) -> Vector3 {
-    vector: Vector3 = ---;
-    vector.x = max(a.x, b.x);
-    vector.y = max(a.y, b.y);
-    vector.z = max(a.z, b.z);
-    return vector;
+Node :: struct (T: Type) {
+    aabb: AABB3;
+
+    user_data: T;
+
+    union {
+        parent_index: int;
+        next: int = NULL_NODE;
+    }
+
+    child1: int;
+    child2: int;
+
+    height: int;
+
+    moved: bool;
 }
 
-AABB :: struct {
-    lower: Vector3;
-    upper: Vector3;
+Stack :: struct (T: Type) {
+    data: [..] T;
+
+    free :: (stack: *Stack) {
+        array_free(stack.data);
+    }
 }
 
-merge :: (a: AABB, b: AABB) -> AABB {
-    // TODO simd
-    aabb: AABB = ---;
-    aabb.lower = min(a.lower, b.lower);
-    aabb.upper = max(a.upper, b.upper);
-    return aabb;
+create_bounding_tree :: ($T: Type) -> BoundingTree(T) {
+    tree: BoundingTree(T);
+    tree.nodes = NewArray(tree.node_capacity, Node(T), false);
+    
+    for i: 0..tree.node_capacity - 2 {
+        tree.nodes[i].next = i + 1;
+        tree.nodes[i].height = -1;
+    }
+    tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
+    tree.nodes[tree.node_capacity - 1].height = -1;
+
+    return tree;
 }
 
-contains :: (outer: AABB, inner: AABB) -> bool {
-    result := false;
-    result = result && outer.lower.x <= inner.lower.x;
-    result = result && outer.lower.y <= inner.lower.y;
-    result = result && outer.lower.z <= inner.lower.z;
-    result = result && inner.upper.x <= outer.upper.x;
-    result = result && inner.upper.y <= outer.upper.y;
-    result = result && inner.upper.z <= outer.upper.z;
-
-    return result;
+// when I name this free it collides with free *void idk why
+free_bounding_tree :: (tree: BoundingTree($T)) {
+    array_free(tree.nodes);
 }
 
-surface_area :: (a: AABB) -> float {
+surface_area :: (a: AABB3) -> float {
     diff := a.upper - a.lower;
     return 2.0 * (diff.x * diff.y + diff.y * diff.z + diff.z * diff.x);
 }
 
-intersection :: (a: AABB, b: AABB) -> bool {
-    d1 := b.lower - a.upper;
-    d2 := a.lower - b.upper;
-
-    if d1.x > 0 || d1.y > 0 || d1.z > 0 {
-        return false;
-    }
-
-    if d2.x > 0 || d2.y > 0 || d2.z > 0 {
-        return false;
-    }
-
-    return true;
-}
-
-Ray :: struct {
-    p1: Vector3;
-    dir: Vector3;
-}
-
-intersection :: (ray: Ray, aabb: AABB) -> bool {
+intersection :: (ray: Ray3, aabb: AABB3) -> bool {
     divx := 1.0 / ray.dir.x;
     divy := 1.0 / ray.dir.y;
     divz := 1.0 / ray.dir.z;
 
-    minx := (aabb.lower.x - ray.p1.x) * divx;
-    maxx := (aabb.upper.x - ray.p1.x) * divx;
+    minx := (aabb.lower.x - ray.p.x) * divx;
+    maxx := (aabb.upper.x - ray.p.x) * divx;
     if minx > maxx {
         t := minx;
         minx = maxx;
         maxx = t;
     }
 
-    miny := (aabb.lower.y - ray.p1.y) * divy;
-    maxy := (aabb.upper.y - ray.p1.y) * divy;
+    miny := (aabb.lower.y - ray.p.y) * divy;
+    maxy := (aabb.upper.y - ray.p.y) * divy;
     if miny > maxy {
         t := miny;
         miny = maxy;
         maxy = t;
     }
 
-    minz := (aabb.lower.z - ray.p1.z) * divz;
-    maxz := (aabb.upper.z - ray.p1.z) * divz;
+    minz := (aabb.lower.z - ray.p.z) * divz;
+    maxz := (aabb.upper.z - ray.p.z) * divz;
     if minz > maxz {
         t := minz;
         minz = maxz;
@@ -102,12 +96,7 @@ intersection :: (ray: Ray, aabb: AABB) -> bool {
     return maxv >= 0 && maxv >= minv;
 }
 
-Segment :: struct {
-    p1: Vector3;
-    p2: Vector3;
-}
-
-intersection :: (segment: Segment, aabb: AABB) -> bool {
+intersection :: (segment: Line3, aabb: AABB3) -> bool {
     // Christer Ericson, p183
     e := aabb.upper - aabb.lower;
     d := segment.p2 - segment.p1;
@@ -144,14 +133,6 @@ intersection :: (segment: Segment, aabb: AABB) -> bool {
     return true;
 }
 
-Stack :: struct (Value_Type: Type) {
-    data: [..] Value_Type;
-
-    free :: (stack: *Stack) {
-        array_free(stack.data);
-    }
-}
-
 push :: (stack: *Stack($T), value: T) {
     array_add(*stack.data, value);
 }
@@ -164,64 +145,11 @@ empty :: (stack: Stack) -> bool {
     return stack.data.count == 0;
 }
 
-Node :: struct (Value_Type: Type) {
-    aabb: AABB;
-
-    user_data: Value_Type;
-
-    union {
-        parent_index: int;
-        next: int = NULL_NODE;
-    }
-
-    child1: int;
-    child2: int;
-
-    height: int;
-
-    moved: bool;
-}
-
 is_leaf :: (node: Node) -> bool {
     return node.child1 == NULL_NODE;
 }
 
-Tree :: struct (Value_Type: Type) {
-    root_index: int = NULL_NODE;
-
-    nodes: [] Node(Value_Type) = ---;
-    node_count: int;
-    node_capacity: int = 16;
-
-    free_list: int;
-
-    insertion_count: int;
-
-    allocator: Allocator = ---;
-    allocator_data: *void = null;
-
-    create :: (allocator: Allocator = context.allocator, allocator_data: *void = context.allocator_data) -> Tree(Value_Type) {
-        tree: Tree(Value_Type);
-        tree.nodes = NewArray(tree.node_capacity, Node(Value_Type), false, allocator, allocator_data);
-        tree.allocator = allocator;
-        tree.allocator_data = allocator_data;
-        
-        for i: 0..tree.node_capacity - 2 {
-            tree.nodes[i].next = i + 1;
-            tree.nodes[i].height = -1;
-        }
-        tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
-        tree.nodes[tree.node_capacity - 1].height = -1;
-
-        return tree;
-    }
-
-    free :: (tree: Tree) {
-        free(tree.nodes.data, tree.allocator, tree.allocator_data);
-    }
-}
-
-create_proxy :: (tree: *Tree($T), aabb: AABB, user_data: T) -> int {
+create_proxy :: (tree: *BoundingTree($T), aabb: AABB3, user_data: T) -> int {
     proxy_id := allocate_node(tree);
 
     r := Vector3.{AABB_EXTENSION, AABB_EXTENSION, AABB_EXTENSION};
@@ -236,7 +164,7 @@ create_proxy :: (tree: *Tree($T), aabb: AABB, user_data: T) -> int {
     return proxy_id;
 }
 
-destroy_proxy :: (tree: *Tree, proxy_id: int) {
+destroy_proxy :: (tree: *BoundingTree, proxy_id: int) {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	assert(is_leaf(tree.nodes[proxy_id]));
 
@@ -244,18 +172,17 @@ destroy_proxy :: (tree: *Tree, proxy_id: int) {
 	free_node(tree, proxy_id);
 }
 
-move_proxy :: (tree: *Tree, aabb1: AABB, displacement: Vector3) {
+move_proxy :: (tree: *BoundingTree, aabb: AABB3, displacement: Vector3) {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
-
 	assert(is_leaf(tree.nodes[proxy_id]));
 
-	// Extend AABB
-	fat_aabb: AABB = ---;
+	// Extend AABB3
+	fat_aabb: AABB3 = ---;
 	r := Vector3.{AABB_EXTENSION, AABB_EXTENSION, AABB_EXTENSION};
     fat_aabb.lower = aabb.lower - r;
     fat_aabb.upper = aabb.upper + r;
 
-	// Predict AABB movement
+	// Predict AABB3 movement
     // TODO I don't really understand what's happening here
     d := AABB_MULTIPLIER * displacement;
 
@@ -278,55 +205,58 @@ move_proxy :: (tree: *Tree, aabb1: AABB, displacement: Vector3) {
 	}
 
     tree_aabb := tree.nodes[proxy_id].aabb;
-	if (contains(tree_aabb, aabb)) {
-		// The tree AABB still contains the object, but it might be too large.
+	if contains(tree_aabb, aabb) {
+		// The tree AABB3 still contains the object, but it might be too large.
 		// Perhaps the object was moving fast but has since gone to sleep.
-		// The huge AABB is larger than the new fat AABB.
-		huge_aabb: AABB = ---;
+		// The huge AABB3 is larger than the new fat AABB3.
+		huge_aabb: AABB3 = ---;
 		huge_aabb.lower = fat_aabb.lower - 4 * r;
 		huge_aabb.upper = fat_aabb.upper + 4 * r;
 
-		if (contains(huge_aabb, tree_aabb)) {
-			// The tree AABB contains the object AABB and the tree AABB is
+		if contains(huge_aabb, tree_aabb) {
+			// The tree AABB3 contains the object AABB3 and the tree AABB3 is
 			// not too large. No tree update needed.
 			return false;
 		}
 
-		// Otherwise the tree AABB is huge and needs to be shrunk
+		// Otherwise the tree AABB3 is huge and needs to be shrunk
 	}
 
 	remove_leaf(tree, proxy_id);
 
 	tree.nodes[proxy_id].aabb = fat_aabb;
 
-	InsertLeaf(proxy_id);
+	insert_leaf(proxy_id);
 
 	tree.nodes[proxy_id].moved = true;
 
 	return true;
 }
 
-get_user_data :: inline (tree: Tree($T), proxy_id: int) -> (T, success: bool #must) {
+get_user_data :: inline (tree: BoundingTree($T), proxy_id: int) -> T {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	return tree.nodes[proxy_id].user_data;
 }
 
-was_moved :: inline (tree: Tree, proxy_id: int) -> bool {
+was_moved :: inline (tree: BoundingTree, proxy_id: int) -> bool {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	return tree.nodes[proxy_id].moved;
 }
 
-clear_moved :: inline (tree: *Tree, proxy_id: int) {
+clear_moved :: inline (tree: *BoundingTree, proxy_id: int) {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	tree.nodes[proxy_id].moved = false;
 }
 
-get_fat_aabb :: inline (tree: Tree, proxy_id: int) -> AABB {
+get_fat_aabb :: inline (tree: BoundingTree, proxy_id: int) -> AABB3 {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	return tree.nodes[proxy_id].aabb;
 }
 
-query :: inline (tree: Tree($T), aabb: AABB, $$callback: (data: T) -> (cont: bool)) -> (data: T, found: bool) {
+query :: inline (tree: BoundingTree($T), aabb: AABB3, $callback: (value: T, data: *$D) -> bool, data: *D) {
+    // expecting there to be `value: T` and `cont: bool` before calling
+
+    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
     stack: Stack(int);
     defer Stack(int).free(*stack);
     push(*stack, tree.root_index);
@@ -340,9 +270,9 @@ query :: inline (tree: Tree($T), aabb: AABB, $$callback: (data: T) -> (cont: boo
 		if intersection(tree.nodes[node_id].aabb, aabb) {
             // TODO does this syntax perform a copy?
 			if is_leaf(tree.nodes[node_id]) {
-				cont := callback(tree.nodes[node_id].user_data);
+				cont := inline callback(tree.nodes[node_id].user_data, data);
 				if !cont {
-					return tree.nodes[node_id].user_data, false;
+					return;
 				}
 			} else {
                 push(*stack, tree.nodes[node_id].child1);
@@ -350,12 +280,61 @@ query :: inline (tree: Tree($T), aabb: AABB, $$callback: (data: T) -> (cont: boo
 			}
 		}
 	}
-
-    value: T = ---;
-    return value, false;
 }
 
-ray_cast :: inline (tree: Tree($T), ray: Ray, $$callback: (ray: Ray, value: T) -> (cont: bool, hit: bool, point: Vector3)) -> (hit: bool, point: Vector3, data: T) {
+raycast :: inline (tree: BoundingTree(Triangle3), ray: Ray3, $callback: (point: Vector3, data: *$D) -> bool, data: *D) {
+    raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *T) -> bool {
+        p, n, h := intersection(tri, ray);
+        return callback(p, data);
+    }, data);
+}
+
+raycast_hit :: inline (tree: BoundingTree(Triangle3), ray: Ray3) -> hit: bool {
+    hit: bool;
+    raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *bool) -> bool {
+        p, n, h := inline intersection(tri, ray);
+        if !h {
+            return true;
+        }
+
+        << data = true;
+        return false;
+    }, *hit);
+
+    return hit;
+}
+
+raycast_nearest :: inline (tree: BoundingTree(Triangle3), ray: Ray3) -> nearest: Vector3, normal: Vector3, hit: bool {
+    NearestData :: struct {
+        dist_squared: float;
+        p: Vector3;
+        n: Vector3;
+    }
+    data: NearestData = .{FLOAT32_MAX, .{0, 0, 0}, .{0, 0, 0}};
+    
+    raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *NearestData) -> bool {
+        p, n, h := inline intersection(tri, ray);
+
+        if h {
+            d2 := distance_squared(p, ray.p);
+            if d2 < data.dist_squared {
+                data.dist_squared = d2;
+                data.p = p;
+                data.n = n;
+            }
+        }
+
+        return true;
+    }, *data);
+
+    if data.dist_squared < FLOAT32_MAX {
+        return data.p, data.n, true;
+    }
+
+    return .{}, .{}, false;
+}
+
+raycast :: inline (tree: BoundingTree($T), ray: Ray3, $callback: (ray: Ray3, value: T, data: *$D) -> bool, data: *D) {
     // TODO this stack can probably be pre allocated based on the depth of the tree
     stack: Stack(int);
     defer Stack(int).free(*stack);
@@ -374,39 +353,37 @@ ray_cast :: inline (tree: Tree($T), ray: Ray, $$callback: (ray: Ray, value: T) -
         }
 
         if is_leaf(tree.nodes[index]) {
-            cont, hit, point := callback(ray, tree.nodes[index].user_data);
+            cont := inline callback(ray, tree.nodes[index].user_data, data);
             if !cont {
-                return hit, point, tree.nodes[index].user_data;
+                return;
             }
         } else {
             push(*stack, tree.nodes[index].child1);
             push(*stack, tree.nodes[index].child2);
         }
     }
-
-    value: T = ---;
-    return false, .{}, value;
 }
 
-ray_cast :: inline (tree: Tree($T), ray: Ray, $$callback: (ray: Ray, value: T) -> (hit: bool)) -> (hit: bool) {
-    hit, point, data := ray_cast(tree, ray, (ray: Ray, value: T) -> bool {
-        if callback(ray, value) {
-            return false, true, .{};
-        }
+// raycast :: inline (tree: BoundingTree($T), ray: Ray3, $callback: (ray: Ray3, value: T) -> (hit: bool)) -> (hit: bool) {
+//     hit: bool;
+//     hit, point, data := raycast(tree, ray, (ray: Ray3, value: T) -> bool {
+//         if callback(ray, value) {
+//             return false;
+//         }
 
-        return true, false, .{};
-    });
+//         return true, false, .{};
+//     });
 
-    return hit;
-}
+//     return hit;
+// }
 
-ray_cast :: inline (tree: Tree($T), segment: Segment, $$callback: (segment: Segment, value: T) -> (cont: bool, hit: bool, point: Vector3)) -> (hit: bool, point: Vector3, data: T) {
+raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: *$D) -> bool, data: *D) {
     // TODO this stack can probably be pre allocated based on the depth of the tree
     stack: Stack(int);
     defer Stack(int).free(*stack);
     push(*stack, tree.root_index);
 
-    segment_aabb: AABB = ---;
+    segment_aabb: AABB3 = ---;
     segment_aabb.lower = min(segment.p1, segment.p2);
     segment_aabb.upper = max(segment.p1, segment.p2);
 
@@ -431,9 +408,9 @@ ray_cast :: inline (tree: Tree($T), segment: Segment, $$callback: (segment: Segm
         }
 
         if is_leaf(tree.nodes[index]) {
-            cont, hit, point := callback(current_segment, tree.nodes[index].user_data);
+            cont := inline callback(current_segment, tree.nodes[index].user_data, data);
             if !cont {
-                return hit, point, tree.nodes[index].user_data;
+                return;
             }
 
             if hit {
@@ -447,15 +424,12 @@ ray_cast :: inline (tree: Tree($T), segment: Segment, $$callback: (segment: Segm
             push(*stack, tree.nodes[index].child2);
         }
     }
-
-    value: T = ---;
-    return false, .{}, value;
 }
 
-ray_cast :: inline (tree: Tree($T), segment: Segment, $$callback: (segment: Segment, value: T) -> (hit: bool)) -> (hit: bool) {
+raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: *$D) -> (hit: bool), data: *D) {
     // TODO this could be improved with scope context capturing
-    hit, point, data := ray_cast(tree, segment, (segment: Segment, value: T) -> (bool, bool, Vector3) {
-        if callback(segment, value) {
+    hit, point, data := raycast(tree, segment, (segment: Line3, value: T) -> (bool, bool, Vector3) {
+        if inline callback(segment, value) {
             return false, true, .{};
         }
 
@@ -465,7 +439,7 @@ ray_cast :: inline (tree: Tree($T), segment: Segment, $$callback: (segment: Segm
     return hit;
 }
 
-validate :: (tree: Tree) {
+validate :: (tree: BoundingTree) {
     #if TREE_DEBUG {
         validate_structure(tree, tree.root_index);
         validate_metrics(tree, tree.root_index);
@@ -484,7 +458,7 @@ validate :: (tree: Tree) {
     }
 }
 
-get_height :: (tree: Tree) -> int {
+get_height :: (tree: BoundingTree) -> int {
 	if (tree.root_index == NULL_NODE) {
 		return 0;
 	}
@@ -492,19 +466,18 @@ get_height :: (tree: Tree) -> int {
 	return tree.nodes[tree.root_index].height;
 }
 
-get_max_balance :: (tree: Tree($T)) -> int {
+get_max_balance :: (tree: BoundingTree($T)) -> int {
 	max_balance := 0;
 
     for i: 0..tree.node_capacity - 1 {
-        node: *Node(T) = *tree.nodes[i];
-		if node.height <= 1 {
+		if tree.nodes[i].height <= 1 {
 			continue;
 		}
 
-		assert(is_leaf(<< node) == false);
+		assert(is_leaf(tree.nodes[i]) == false);
 
-		child1 := node.child1;
-		child2 := node.child2;
+		child1 := tree.nodes[i].child1;
+		child2 := tree.nodes[i].child2;
 		balance := abs(tree.nodes[child2].height - tree.nodes[child1].height);
 		max_balance = max(max_balance, balance);
 	}
@@ -512,7 +485,7 @@ get_max_balance :: (tree: Tree($T)) -> int {
 	return max_balance;
 }
 
-get_area_ratio :: (tree: Tree($T)) -> float {
+get_area_ratio :: (tree: BoundingTree($T)) -> float {
 	if (tree.root_index == NULL_NODE) {
 		return 0;
 	}
@@ -520,7 +493,7 @@ get_area_ratio :: (tree: Tree($T)) -> float {
     root: *Node(T) = *tree.nodes[tree.root_index];
 	root_area := surface_area(root.aabb);
 
-	total_area := 0;
+	total_area := 0.0;
     for i: 0..tree.node_capacity - 1 {
         node: *Node(T) = *tree.nodes[i];
 		if node.height < 0 {
@@ -534,7 +507,7 @@ get_area_ratio :: (tree: Tree($T)) -> float {
 	return total_area / root_area;
 }
 
-rebuild_bottom_up :: (tree: *Tree($T)) {
+rebuild_bottom_up :: (tree: *BoundingTree($T)) {
     nodes: [] int = NewArray(tree.node_count, int, false);
 	count := 0;
 
@@ -600,7 +573,7 @@ rebuild_bottom_up :: (tree: *Tree($T)) {
 	validate(tree);
 }
 
-shift_origin :: (tree: *Tree, new_origin: Vector3) {
+shift_origin :: (tree: *BoundingTree, new_origin: Vector3) {
 	// Build array of leaves. Free the rest.
     for i: 0..tree.node_capacity - 1 {
 		tree.nodes[i].aabb.lower -= new_origin;
@@ -610,7 +583,7 @@ shift_origin :: (tree: *Tree, new_origin: Vector3) {
 
 #scope_file
 
-allocate_node :: (tree: *Tree($T)) -> int {
+allocate_node :: (tree: *BoundingTree($T)) -> int {
 	// Expand the node pool as needed.
 	if tree.free_list == NULL_NODE {
 		assert(tree.node_count == tree.node_capacity);
@@ -618,9 +591,9 @@ allocate_node :: (tree: *Tree($T)) -> int {
 		// The free list is empty. Rebuild a bigger pool.
         old_nodes: [] Node(T) = tree.nodes;
         tree.node_capacity *= 2;
-        tree.nodes = NewArray(tree.node_capacity, Node(T), false, tree.allocator, tree.allocator_data);
+        tree.nodes = NewArray(tree.node_capacity, Node(T), false);
         memcpy(tree.nodes.data, old_nodes.data, tree.node_count * size_of(Node(T)));
-        free(old_nodes.data, tree.allocator, tree.allocator_data);
+        free(old_nodes.data);
 
 		// Build a linked list for the free list. The parent
 		// pointer becomes the "next" pointer.
@@ -629,7 +602,7 @@ allocate_node :: (tree: *Tree($T)) -> int {
 			tree.nodes[i].height = -1;
 		}
         tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
-        tree.nodes[tree.node_capacity - 2].height = -1;
+        tree.nodes[tree.node_capacity - 1].height = -1;
         tree.free_list = tree.node_count;
 	}
 
@@ -646,7 +619,7 @@ allocate_node :: (tree: *Tree($T)) -> int {
 	return node_id;
 }
 
-free_node :: (tree : *Tree, node_id: int) {
+free_node :: (tree: *BoundingTree, node_id: int) {
     assert(0 <= node_id && node_id < tree.node_capacity);
 	assert(0 < tree.node_count);
 	tree.nodes[node_id].next = tree.free_list;
@@ -655,11 +628,10 @@ free_node :: (tree : *Tree, node_id: int) {
 	tree.node_count -= 1;
 }
 
-// not done
-insert_leaf :: (tree: *Tree($T), leaf: int) {
+insert_leaf :: (tree: *BoundingTree($T), leaf: int) {
     tree.insertion_count += 1;
 
-	if (tree.root_index == NULL_NODE) {
+	if tree.root_index == NULL_NODE {
 		tree.root_index = leaf;
 		tree.nodes[tree.root_index].parent_index = NULL_NODE;
 		return;
@@ -692,7 +664,7 @@ insert_leaf :: (tree: *Tree($T), leaf: int) {
 			aabb := merge(leaf_aabb, tree.nodes[child1].aabb);
 			old_area := surface_area(tree.nodes[child1].aabb);
 			new_area := surface_area(aabb);
-			cost1 = (new_area - old_area) + inheritance_cost;
+			cost1 = new_area - old_area + inheritance_cost;
 		}
 
 		// Cost of descending into child2
@@ -733,7 +705,7 @@ insert_leaf :: (tree: *Tree($T), leaf: int) {
 
 	if old_parent != NULL_NODE {
 		// The sibling was not the root.
-		if (tree.nodes[old_parent].child1 == sibling) {
+		if tree.nodes[old_parent].child1 == sibling {
 			tree.nodes[old_parent].child1 = new_parent;
 		} else {
 			tree.nodes[old_parent].child2 = new_parent;
@@ -752,7 +724,7 @@ insert_leaf :: (tree: *Tree($T), leaf: int) {
 		tree.root_index = new_parent;
 	}
 
-	// Walk back up the tree fixing heights and AABBs
+	// Walk back up the tree fixing heights and AABB3s
 	index = tree.nodes[leaf].parent_index;
 	while index != NULL_NODE {
 		index = balance(tree, index);
@@ -772,8 +744,8 @@ insert_leaf :: (tree: *Tree($T), leaf: int) {
 	//Validate();
 }
 
-remove_leaf :: (tree: *Tree, leaf: int) {
-    if (leaf == tree.root_index) {
+remove_leaf :: (tree: *BoundingTree, leaf: int) {
+    if leaf == tree.root_index {
 		tree.root_index = NULL_NODE;
 		return;
 	}
@@ -789,7 +761,7 @@ remove_leaf :: (tree: *Tree, leaf: int) {
 
 	if grand_parent != NULL_NODE {
 		// Destroy parent and connect sibling to grand_parent.
-		if (tree.nodes[grand_parent].child1 == parent) {
+		if tree.nodes[grand_parent].child1 == parent {
 			tree.nodes[grand_parent].child1 = sibling;
 		} else {
 			tree.nodes[grand_parent].child2 = sibling;
@@ -819,7 +791,7 @@ remove_leaf :: (tree: *Tree, leaf: int) {
 	//Validate();
 }
 
-balance :: (tree: *Tree($T), i_a: int) -> int {
+balance :: (tree: *BoundingTree($T), i_a: int) -> int {
     assert(i_a != NULL_NODE);
 
     a: *Node(T) = *tree.nodes[i_a];
@@ -940,11 +912,11 @@ balance :: (tree: *Tree($T), i_a: int) -> int {
 	return i_a;
 }
 
-compute_height :: (tree: Tree) -> int {
+compute_height :: (tree: BoundingTree) -> int {
 	return compute_height(tree, tree.root_index);
 }
 
-compute_height :: (tree: Tree($T), node_id: int) -> int {
+compute_height :: (tree: BoundingTree($T), node_id: int) -> int {
 	assert(0 <= node_id && node_id < tree.node_capacity);
     node: *Node(T) = *tree.nodes[node_id];
 
@@ -957,7 +929,7 @@ compute_height :: (tree: Tree($T), node_id: int) -> int {
 	return 1 + max(height1, height2);
 }
 
-validate_structure :: (tree: Tree($T), index: int) {
+validate_structure :: (tree: BoundingTree($T), index: int) {
 	if index == NULL_NODE {
 		return;
 	}
@@ -989,7 +961,7 @@ validate_structure :: (tree: Tree($T), index: int) {
 	validate_structure(tree, child2);
 }
 
-validate_metrics :: (tree: Tree($T), index: int) {
+validate_metrics :: (tree: BoundingTree($T), index: int) {
 	if index == NULL_NODE {
 		return;
 	}
@@ -1030,3 +1002,7 @@ EPSILON :: 0.000001;
 AABB_EXTENSION :: 0.1;
 AABB_MULTIPLIER :: 4.0;
 TREE_DEBUG :: true;
+
+#import "Math";
+#import "Basic";
+#import "JaiMath";
