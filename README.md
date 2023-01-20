@@ -1,5 +1,7 @@
 ## Jai Binary BVH Tree
 
+This depends in [https://github.com/kujukuju/jaimath](https://github.com/kujukuju/jaimath) which needs a function naming refactor sooner or later.
+
 API
 ```jai
 create_bounding_tree :: ($T: Type) -> BoundingTree(T);
