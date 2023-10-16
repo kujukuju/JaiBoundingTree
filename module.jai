@@ -1,14 +1,16 @@
 
 BoundingTree :: struct (T: Type) {
-    root_index: int = NULL_NODE;
+    root_index: s32 = NULL_NODE;
 
-    nodes: [] Node(T) = ---;
-    node_count: int;
-    node_capacity: int = 16;
+    nodes: [] Node(T);
+    node_count: s32;
+    node_capacity: s32 = 16;
 
-    free_list: int;
+    free_list: s32;
 
-    insertion_count: int;
+    insertion_count: s32;
+
+    stack: Stack(s32);
 }
 
 Node :: struct (T: Type) {
@@ -16,25 +18,22 @@ Node :: struct (T: Type) {
 
     user_data: T;
 
-    union {
-        parent_index: int;
-        next: int = NULL_NODE;
-    }
+    // TODO I cant use unions until my serializer supports unions of pod, which is a whole project in itself
+    // union {
+        parent_index: s32;
+        next: s32 = NULL_NODE;
+    // }
 
-    child1: int;
-    child2: int;
+    child1: s32;
+    child2: s32;
 
-    height: int;
+    height: s32;
 
     moved: bool;
 }
 
 Stack :: struct (T: Type) {
     data: [..] T;
-
-    free :: (stack: *Stack) {
-        array_free(stack.data);
-    }
 }
 
 create_bounding_tree :: ($T: Type) -> BoundingTree(T) {
@@ -54,6 +53,11 @@ create_bounding_tree :: ($T: Type) -> BoundingTree(T) {
 // when I name this free it collides with free *void idk why
 free_bounding_tree :: (tree: BoundingTree($T)) {
     array_free(tree.nodes);
+    free_stack(tree.stack);
+}
+
+free_stack :: (stack: Stack) {
+    array_free(stack.data);
 }
 
 surface_area :: (a: AABB3) -> float {
@@ -168,11 +172,11 @@ destroy_proxy :: (tree: *BoundingTree, proxy_id: int) {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	assert(is_leaf(tree.nodes[proxy_id]));
 
-	remove_leaf(tree, proxy_id);
-	free_node(tree, proxy_id);
+	remove_leaf(tree, cast(s32) proxy_id);
+	free_node(tree, cast(s32) proxy_id);
 }
 
-move_proxy :: (tree: *BoundingTree, aabb: AABB3, displacement: Vector3) {
+move_proxy :: (tree: *BoundingTree, proxy_id: int, aabb: AABB3, displacement: Vector3 = .{0, 0, 0}) -> bool {
 	assert(0 <= proxy_id && proxy_id < tree.node_capacity);
 	assert(is_leaf(tree.nodes[proxy_id]));
 
@@ -222,11 +226,11 @@ move_proxy :: (tree: *BoundingTree, aabb: AABB3, displacement: Vector3) {
 		// Otherwise the tree AABB3 is huge and needs to be shrunk
 	}
 
-	remove_leaf(tree, proxy_id);
+	remove_leaf(tree, cast(s32) proxy_id);
 
 	tree.nodes[proxy_id].aabb = fat_aabb;
 
-	insert_leaf(proxy_id);
+	insert_leaf(tree, cast(s32) proxy_id);
 
 	tree.nodes[proxy_id].moved = true;
 
@@ -253,21 +257,44 @@ get_fat_aabb :: inline (tree: BoundingTree, proxy_id: int) -> AABB3 {
 	return tree.nodes[proxy_id].aabb;
 }
 
-query :: inline (tree: BoundingTree($T), aabb: AABB3, $callback: (value: T, data: *$D) -> bool, data: *D) {
+query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T) -> bool) {
     // expecting there to be `value: T` and `cont: bool` before calling
 
-    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
-    stack: Stack(int);
-    defer Stack(int).free(*stack);
-    push(*stack, tree.root_index);
+    push(*tree.stack, tree.root_index);
 
-	while !empty(stack) {
-		node_id := pop(*stack);
+	while !empty(tree.stack) {
+		node_id := pop(*tree.stack);
 		if node_id == NULL_NODE {
 			continue;
 		}
 
-		if intersection(tree.nodes[node_id].aabb, aabb) {
+		if intersects(tree.nodes[node_id].aabb, aabb) {
+            // TODO does this syntax perform a copy?
+			if is_leaf(tree.nodes[node_id]) {
+				cont := callback(tree.nodes[node_id].user_data);
+				if !cont {
+					return;
+				}
+			} else {
+                push(*tree.stack, tree.nodes[node_id].child1);
+                push(*tree.stack, tree.nodes[node_id].child2);
+			}
+		}
+	}
+}
+
+query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D) -> bool, data: D) {
+    // expecting there to be `value: T` and `cont: bool` before calling
+
+    push(*tree.stack, tree.root_index);
+
+	while !empty(tree.stack) {
+		node_id := pop(*tree.stack);
+		if node_id == NULL_NODE {
+			continue;
+		}
+
+		if intersects(tree.nodes[node_id].aabb, aabb) {
             // TODO does this syntax perform a copy?
 			if is_leaf(tree.nodes[node_id]) {
 				cont := inline callback(tree.nodes[node_id].user_data, data);
@@ -275,14 +302,75 @@ query :: inline (tree: BoundingTree($T), aabb: AABB3, $callback: (value: T, data
 					return;
 				}
 			} else {
-                push(*stack, tree.nodes[node_id].child1);
-                push(*stack, tree.nodes[node_id].child2);
+                push(*tree.stack, tree.nodes[node_id].child1);
+                push(*tree.stack, tree.nodes[node_id].child2);
 			}
 		}
 	}
 }
 
-raycast :: inline (tree: BoundingTree(Triangle3), ray: Ray3, $callback: (point: Vector3, data: *$D) -> bool, data: *D) {
+query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T, id: int) -> bool) {
+    // expecting there to be `value: T` and `cont: bool` before calling
+
+    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
+    push(*tree.stack, tree.root_index);
+
+	while !empty(tree.stack) {
+		node_id := pop(*tree.stack);
+		if node_id == NULL_NODE {
+			continue;
+		}
+
+		if intersects(tree.nodes[node_id].aabb, aabb) {
+            // TODO does this syntax perform a copy?
+			if is_leaf(tree.nodes[node_id]) {
+				cont := callback(tree.nodes[node_id].user_data, node_id);
+				if !cont {
+					return;
+				}
+			} else {
+                push(*tree.stack, tree.nodes[node_id].child1);
+                push(*tree.stack, tree.nodes[node_id].child2);
+			}
+		}
+	}
+}
+
+query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D, id: int) -> bool, data: D) {
+    // expecting there to be `value: T` and `cont: bool` before calling
+
+    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
+    push(*tree.stack, tree.root_index);
+
+	while !empty(tree.stack) {
+		node_id := pop(*tree.stack);
+		if node_id == NULL_NODE {
+			continue;
+		}
+
+		if intersects(tree.nodes[node_id].aabb, aabb) {
+            // TODO does this syntax perform a copy?
+			if is_leaf(tree.nodes[node_id]) {
+				cont := inline callback(tree.nodes[node_id].user_data, data, node_id);
+				if !cont {
+					return;
+				}
+			} else {
+                push(*tree.stack, tree.nodes[node_id].child1);
+                push(*tree.stack, tree.nodes[node_id].child2);
+			}
+		}
+	}
+}
+
+raycast :: inline (tree: BoundingTree(Triangle3), ray: Ray3, callback: (point: Vector3) -> bool) {
+    raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *T) -> bool {
+        p, n, h := intersection(tri, ray);
+        return callback(p);
+    }, data);
+}
+
+raycast :: inline (tree: BoundingTree(Triangle3), ray: Ray3, $callback: (point: Vector3, data: $D) -> bool, data: D) {
     raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *T) -> bool {
         p, n, h := intersection(tri, ray);
         return callback(p, data);
@@ -334,10 +422,40 @@ raycast_nearest :: inline (tree: BoundingTree(Triangle3), ray: Ray3) -> nearest:
     return .{}, .{}, false;
 }
 
-raycast :: inline (tree: BoundingTree($T), ray: Ray3, $callback: (ray: Ray3, value: T, data: *$D) -> bool, data: *D) {
+raycast :: inline (tree: BoundingTree($T), ray: Ray3, callback: (ray: Ray3, value: T) -> bool) {
     // TODO this stack can probably be pre allocated based on the depth of the tree
-    stack: Stack(int);
-    defer Stack(int).free(*stack);
+    stack: Stack(s32);
+    defer free_stack(stack);
+
+    push(*stack, tree.root_index);
+
+    while !empty(stack) {
+        index := pop(*stack);
+
+        if index == NULL_NODE {
+            continue;
+        }
+
+        if !intersection(ray, tree.nodes[index].aabb) {
+            continue;
+        }
+
+        if is_leaf(tree.nodes[index]) {
+            cont := callback(ray, tree.nodes[index].user_data);
+            if !cont {
+                return;
+            }
+        } else {
+            push(*stack, tree.nodes[index].child1);
+            push(*stack, tree.nodes[index].child2);
+        }
+    }
+}
+
+raycast :: inline (tree: BoundingTree($T), ray: Ray3, $callback: (ray: Ray3, value: T, data: $D) -> bool, data: D) {
+    // TODO this stack can probably be pre allocated based on the depth of the tree
+    stack: Stack(s32);
+    defer free_stack(stack);
 
     push(*stack, tree.root_index);
 
@@ -377,10 +495,10 @@ raycast :: inline (tree: BoundingTree($T), ray: Ray3, $callback: (ray: Ray3, val
 //     return hit;
 // }
 
-raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: *$D) -> bool, data: *D) {
+raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: $D) -> bool, data: D) {
     // TODO this stack can probably be pre allocated based on the depth of the tree
-    stack: Stack(int);
-    defer Stack(int).free(*stack);
+    stack: Stack(s32);
+    defer free_stack(stack);
     push(*stack, tree.root_index);
 
     segment_aabb: AABB3 = ---;
@@ -426,7 +544,7 @@ raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: 
     }
 }
 
-raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: *$D) -> (hit: bool), data: *D) {
+raycast :: inline (tree: BoundingTree($T), segment: Line3, $callback: (segment: Line3, value: T, data: $D) -> (hit: bool), data: D) {
     // TODO this could be improved with scope context capturing
     hit, point, data := raycast(tree, segment, (segment: Line3, value: T) -> (bool, bool, Vector3) {
         if inline callback(segment, value) {
@@ -583,7 +701,7 @@ shift_origin :: (tree: *BoundingTree, new_origin: Vector3) {
 
 #scope_file
 
-allocate_node :: (tree: *BoundingTree($T)) -> int {
+allocate_node :: (tree: *BoundingTree($T)) -> s32 {
 	// Expand the node pool as needed.
 	if tree.free_list == NULL_NODE {
 		assert(tree.node_count == tree.node_capacity);
@@ -619,7 +737,7 @@ allocate_node :: (tree: *BoundingTree($T)) -> int {
 	return node_id;
 }
 
-free_node :: (tree: *BoundingTree, node_id: int) {
+free_node :: (tree: *BoundingTree, node_id: s32) {
     assert(0 <= node_id && node_id < tree.node_capacity);
 	assert(0 < tree.node_count);
 	tree.nodes[node_id].next = tree.free_list;
@@ -628,7 +746,7 @@ free_node :: (tree: *BoundingTree, node_id: int) {
 	tree.node_count -= 1;
 }
 
-insert_leaf :: (tree: *BoundingTree($T), leaf: int) {
+insert_leaf :: (tree: *BoundingTree($T), leaf: s32) {
     tree.insertion_count += 1;
 
 	if tree.root_index == NULL_NODE {
@@ -744,7 +862,7 @@ insert_leaf :: (tree: *BoundingTree($T), leaf: int) {
 	//Validate();
 }
 
-remove_leaf :: (tree: *BoundingTree, leaf: int) {
+remove_leaf :: (tree: *BoundingTree, leaf: s32) {
     if leaf == tree.root_index {
 		tree.root_index = NULL_NODE;
 		return;
@@ -752,7 +870,7 @@ remove_leaf :: (tree: *BoundingTree, leaf: int) {
 
 	parent := tree.nodes[leaf].parent_index;
 	grand_parent := tree.nodes[parent].parent_index;
-	sibling: int;
+	sibling: s32;
 	if tree.nodes[parent].child1 == leaf {
 		sibling = tree.nodes[parent].child2;
 	} else {
@@ -791,7 +909,7 @@ remove_leaf :: (tree: *BoundingTree, leaf: int) {
 	//Validate();
 }
 
-balance :: (tree: *BoundingTree($T), i_a: int) -> int {
+balance :: (tree: *BoundingTree($T), i_a: s32) -> s32 {
     assert(i_a != NULL_NODE);
 
     a: *Node(T) = *tree.nodes[i_a];
@@ -912,11 +1030,11 @@ balance :: (tree: *BoundingTree($T), i_a: int) -> int {
 	return i_a;
 }
 
-compute_height :: (tree: BoundingTree) -> int {
+compute_height :: (tree: BoundingTree) -> s32 {
 	return compute_height(tree, tree.root_index);
 }
 
-compute_height :: (tree: BoundingTree($T), node_id: int) -> int {
+compute_height :: (tree: BoundingTree($T), node_id: s32) -> s32 {
 	assert(0 <= node_id && node_id < tree.node_capacity);
     node: *Node(T) = *tree.nodes[node_id];
 
@@ -929,7 +1047,7 @@ compute_height :: (tree: BoundingTree($T), node_id: int) -> int {
 	return 1 + max(height1, height2);
 }
 
-validate_structure :: (tree: BoundingTree($T), index: int) {
+validate_structure :: (tree: BoundingTree($T), index: s32) {
 	if index == NULL_NODE {
 		return;
 	}
@@ -961,7 +1079,7 @@ validate_structure :: (tree: BoundingTree($T), index: int) {
 	validate_structure(tree, child2);
 }
 
-validate_metrics :: (tree: BoundingTree($T), index: int) {
+validate_metrics :: (tree: BoundingTree($T), index: s32) {
 	if index == NULL_NODE {
 		return;
 	}
@@ -996,7 +1114,7 @@ validate_metrics :: (tree: BoundingTree($T), index: int) {
 	validate_metrics(tree, child2);
 }
 
-NULL_NODE :: -1;
+NULL_NODE: s32 : -1;
 EPSILON :: 0.000001;
 // the padding of an aabb to avoid needless updates every time the object moves
 AABB_EXTENSION :: 0.1;
