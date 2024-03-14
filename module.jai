@@ -257,7 +257,7 @@ get_fat_aabb :: inline (tree: BoundingTree, proxy_id: int) -> AABB3 {
 	return tree.nodes[proxy_id].aabb;
 }
 
-query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T) -> bool) {
+query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> bool) {
     // expecting there to be `value: T` and `cont: bool` before calling
 
     push(*tree.stack, tree.root_index);
@@ -271,7 +271,7 @@ query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T) -> b
 		if intersects(tree.nodes[node_id].aabb, aabb) {
             // TODO does this syntax perform a copy?
 			if is_leaf(tree.nodes[node_id]) {
-				cont := callback(tree.nodes[node_id].user_data);
+				cont := inline callback(tree.nodes[node_id].user_data);
 				if !cont {
 					return;
 				}
