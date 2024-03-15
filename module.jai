@@ -257,8 +257,21 @@ get_fat_aabb :: inline (tree: BoundingTree, proxy_id: int) -> AABB3 {
 	return tree.nodes[proxy_id].aabb;
 }
 
-query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> bool) {
-    // expecting there to be `value: T` and `cont: bool` before calling
+BoundingQuery :: struct (T: Type) {
+    tree: *BoundingTree(T);
+    aabb: AABB3;
+}
+
+query :: (tree: *BoundingTree($T), aabb: AABB3) -> BoundingQuery(T) {
+    return BoundingQuery(T).{tree, aabb};
+}
+
+for_expansion :: (query: BoundingQuery($T), body: Code, flags: For_Flags) #expand {
+    // not sure what reverse would mean for a tree, although we could pop a stack I guess
+    #assert(!(flags & .REVERSE));
+
+    tree := query.tree;
+    aabb := query.aabb;
 
     push(*tree.stack, tree.root_index);
 
@@ -271,10 +284,10 @@ query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> 
 		if intersects(tree.nodes[node_id].aabb, aabb) {
             // TODO does this syntax perform a copy?
 			if is_leaf(tree.nodes[node_id]) {
-				cont := inline callback(tree.nodes[node_id].user_data);
-				if !cont {
-					return;
-				}
+                `it := tree.nodes[node_id].user_data;
+                `it_index := node_id;
+
+                #insert body;
 			} else {
                 push(*tree.stack, tree.nodes[node_id].child1);
                 push(*tree.stack, tree.nodes[node_id].child2);
@@ -283,85 +296,133 @@ query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> 
 	}
 }
 
-query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D) -> bool, data: D) {
-    // expecting there to be `value: T` and `cont: bool` before calling
+// query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> bool) {
+//     // expecting there to be `value: T` and `cont: bool` before calling
 
-    push(*tree.stack, tree.root_index);
+//     push(*tree.stack, tree.root_index);
 
-	while !empty(tree.stack) {
-		node_id := pop(*tree.stack);
-		if node_id == NULL_NODE {
-			continue;
-		}
+// 	while !empty(tree.stack) {
+// 		node_id := pop(*tree.stack);
+// 		if node_id == NULL_NODE {
+// 			continue;
+// 		}
 
-		if intersects(tree.nodes[node_id].aabb, aabb) {
-            // TODO does this syntax perform a copy?
-			if is_leaf(tree.nodes[node_id]) {
-				cont := inline callback(tree.nodes[node_id].user_data, data);
-				if !cont {
-					return;
-				}
-			} else {
-                push(*tree.stack, tree.nodes[node_id].child1);
-                push(*tree.stack, tree.nodes[node_id].child2);
-			}
-		}
-	}
-}
+// 		if intersects(tree.nodes[node_id].aabb, aabb) {
+//             // TODO does this syntax perform a copy?
+// 			if is_leaf(tree.nodes[node_id]) {
+// 				cont := inline callback(tree.nodes[node_id].user_data);
+// 				if !cont {
+// 					return;
+// 				}
+// 			} else {
+//                 push(*tree.stack, tree.nodes[node_id].child1);
+//                 push(*tree.stack, tree.nodes[node_id].child2);
+// 			}
+// 		}
+// 	}
+// }
 
-query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T, id: int) -> bool) {
-    // expecting there to be `value: T` and `cont: bool` before calling
+// query :: inline (tree: *BoundingTree($T), aabb: AABB3, code: Code) #expand {
+//     push(*tree.stack, tree.root_index);
 
-    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
-    push(*tree.stack, tree.root_index);
+// 	while !empty(tree.stack) {
+// 		node_id := pop(*tree.stack);
+// 		if node_id == NULL_NODE {
+// 			continue;
+// 		}
 
-	while !empty(tree.stack) {
-		node_id := pop(*tree.stack);
-		if node_id == NULL_NODE {
-			continue;
-		}
+// 		if intersects(tree.nodes[node_id].aabb, aabb) {
+//             // TODO does this syntax perform a copy?
+// 			if is_leaf(tree.nodes[node_id]) {
+//                 it := tree.nodes[node_id].user_data;
+//                 it_index := node_id;
 
-		if intersects(tree.nodes[node_id].aabb, aabb) {
-            // TODO does this syntax perform a copy?
-			if is_leaf(tree.nodes[node_id]) {
-				cont := callback(tree.nodes[node_id].user_data, node_id);
-				if !cont {
-					return;
-				}
-			} else {
-                push(*tree.stack, tree.nodes[node_id].child1);
-                push(*tree.stack, tree.nodes[node_id].child2);
-			}
-		}
-	}
-}
+//                 #insert,scope() code;
+// 			} else {
+//                 push(*tree.stack, tree.nodes[node_id].child1);
+//                 push(*tree.stack, tree.nodes[node_id].child2);
+// 			}
+// 		}
+// 	}
+// }
 
-query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D, id: int) -> bool, data: D) {
-    // expecting there to be `value: T` and `cont: bool` before calling
+// query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D) -> bool, data: D) {
+//     push(*tree.stack, tree.root_index);
 
-    // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
-    push(*tree.stack, tree.root_index);
+// 	while !empty(tree.stack) {
+// 		node_id := pop(*tree.stack);
+// 		if node_id == NULL_NODE {
+// 			continue;
+// 		}
 
-	while !empty(tree.stack) {
-		node_id := pop(*tree.stack);
-		if node_id == NULL_NODE {
-			continue;
-		}
+// 		if intersects(tree.nodes[node_id].aabb, aabb) {
+//             // TODO does this syntax perform a copy?
+// 			if is_leaf(tree.nodes[node_id]) {
+// 				cont := inline callback(tree.nodes[node_id].user_data, data);
+// 				if !cont {
+// 					return;
+// 				}
+// 			} else {
+//                 push(*tree.stack, tree.nodes[node_id].child1);
+//                 push(*tree.stack, tree.nodes[node_id].child2);
+// 			}
+// 		}
+// 	}
+// }
 
-		if intersects(tree.nodes[node_id].aabb, aabb) {
-            // TODO does this syntax perform a copy?
-			if is_leaf(tree.nodes[node_id]) {
-				cont := inline callback(tree.nodes[node_id].user_data, data, node_id);
-				if !cont {
-					return;
-				}
-			} else {
-                push(*tree.stack, tree.nodes[node_id].child1);
-                push(*tree.stack, tree.nodes[node_id].child2);
-			}
-		}
-	}
-}
+// query :: inline (tree: *BoundingTree($T), aabb: AABB3, callback: (value: T, id: int) -> bool) {
+//     // expecting there to be `value: T` and `cont: bool` before calling
+
+//     // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
+//     push(*tree.stack, tree.root_index);
+
+// 	while !empty(tree.stack) {
+// 		node_id := pop(*tree.stack);
+// 		if node_id == NULL_NODE {
+// 			continue;
+// 		}
+
+// 		if intersects(tree.nodes[node_id].aabb, aabb) {
+//             // TODO does this syntax perform a copy?
+// 			if is_leaf(tree.nodes[node_id]) {
+// 				cont := callback(tree.nodes[node_id].user_data, node_id);
+// 				if !cont {
+// 					return;
+// 				}
+// 			} else {
+//                 push(*tree.stack, tree.nodes[node_id].child1);
+//                 push(*tree.stack, tree.nodes[node_id].child2);
+// 			}
+// 		}
+// 	}
+// }
+
+// query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T, data: $D, id: int) -> bool, data: D) {
+//     // expecting there to be `value: T` and `cont: bool` before calling
+
+//     // TODO really should not be re allocating this, unless I want this tree to be queryable in parallel?
+//     push(*tree.stack, tree.root_index);
+
+// 	while !empty(tree.stack) {
+// 		node_id := pop(*tree.stack);
+// 		if node_id == NULL_NODE {
+// 			continue;
+// 		}
+
+// 		if intersects(tree.nodes[node_id].aabb, aabb) {
+//             // TODO does this syntax perform a copy?
+// 			if is_leaf(tree.nodes[node_id]) {
+// 				cont := inline callback(tree.nodes[node_id].user_data, data, node_id);
+// 				if !cont {
+// 					return;
+// 				}
+// 			} else {
+//                 push(*tree.stack, tree.nodes[node_id].child1);
+//                 push(*tree.stack, tree.nodes[node_id].child2);
+// 			}
+// 		}
+// 	}
+// }
 
 raycast :: inline (tree: BoundingTree(Triangle3), ray: Ray3, callback: (point: Vector3) -> bool) {
     raycast(tree, ray, (ray: Ray3, tri: Triangle3, data: *T) -> bool {
