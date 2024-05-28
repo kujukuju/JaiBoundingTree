@@ -36,6 +36,24 @@ Stack :: struct (T: Type) {
     data: [..] T;
 }
 
+for_expansion :: (tree: BoundingTree($T), body: Code, flags: For_Flags) #expand {
+    #assert(!(flags & .REVERSE));
+
+    for node, proxy_id: tree.nodes {
+        if is_leaf(node) {
+            #if flags & .POINTER {
+                `it := *node.user_data;
+            } else {
+                `it := node.user_data;
+            }
+
+            `it_index := proxy_id;
+
+            #insert body;
+        }
+    }
+}
+
 create_bounding_tree :: ($T: Type) -> BoundingTree(T) {
     tree: BoundingTree(T);
     tree.nodes = NewArray(tree.node_capacity, Node(T), false);
@@ -154,6 +172,8 @@ is_leaf :: (node: Node) -> bool {
 }
 
 create_proxy :: (tree: *BoundingTree($T), aabb: AABB3, user_data: T) -> int {
+    assert(tree.nodes.data != null, "You have to create your tree before you try to use it.\n");
+    
     proxy_id := allocate_node(tree);
 
     r := Vector3.{AABB_EXTENSION, AABB_EXTENSION, AABB_EXTENSION};
