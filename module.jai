@@ -171,6 +171,13 @@ is_leaf :: (node: Node) -> bool {
     return node.child1 == NULL_NODE;
 }
 
+create_proxy :: (tree: *BoundingTree(Triangle3), triangle: Triangle3) -> int {
+    aabb: AABB3 = ---;
+    aabb.lower = min(triangle.a, min(triangle.b, triangle.c));
+    aabb.upper = max(triangle.a, max(triangle.b, triangle.c));
+    return create_proxy(tree, aabb, triangle);
+}
+
 create_proxy :: (tree: *BoundingTree($T), aabb: AABB3, user_data: T) -> int {
     assert(tree.nodes.data != null, "You have to create your tree before you try to use it.\n");
     
