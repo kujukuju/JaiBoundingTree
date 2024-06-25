@@ -78,6 +78,20 @@ free_stack :: (stack: Stack) {
     array_free(stack.data);
 }
 
+tree_reset :: (tree: *BoundingTree($T)) {
+    tree.root_index = NULL_NODE;
+    tree.node_count = 0;
+    tree.free_list = 0;
+    tree.insertion_count = 0;
+    for i: 0..tree.node_capacity - 2 {
+        tree.nodes[i].next = i + 1;
+        tree.nodes[i].height = -1;
+    }
+    tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
+    tree.nodes[tree.node_capacity - 1].height = -1;
+    tree.stack.data.count = 0;
+}
+
 surface_area :: (a: AABB3) -> float {
     diff := a.upper - a.lower;
     return 2.0 * (diff.x * diff.y + diff.y * diff.z + diff.z * diff.x);
