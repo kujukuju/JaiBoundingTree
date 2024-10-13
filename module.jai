@@ -54,8 +54,9 @@ for_expansion :: (tree: BoundingTree($T), body: Code, flags: For_Flags) #expand 
     }
 }
 
-create_bounding_tree :: ($T: Type) -> BoundingTree(T) {
+create_bounding_tree :: ($T: Type, initial_capacity: s32 = 0) -> BoundingTree(T) {
     tree: BoundingTree(T);
+    if initial_capacity then tree.node_capacity = initial_capacity;
     tree.nodes = NewArray(tree.node_capacity, Node(T), false);
     
     for i: 0..tree.node_capacity - 2 {
@@ -83,12 +84,14 @@ tree_reset :: (tree: *BoundingTree($T)) {
     tree.node_count = 0;
     tree.free_list = 0;
     tree.insertion_count = 0;
-    for i: 0..tree.node_capacity - 2 {
-        tree.nodes[i].next = i + 1;
-        tree.nodes[i].height = -1;
+    if tree.nodes.data {
+        for i: 0..tree.node_capacity - 2 {
+            tree.nodes[i].next = i + 1;
+            tree.nodes[i].height = -1;
+        }
+        tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
+        tree.nodes[tree.node_capacity - 1].height = -1;
     }
-    tree.nodes[tree.node_capacity - 1].next = NULL_NODE;
-    tree.nodes[tree.node_capacity - 1].height = -1;
     tree.stack.data.count = 0;
 }
 
@@ -335,6 +338,15 @@ for_expansion :: (query: BoundingQuery($T), body: Code, flags: For_Flags) #expan
 			}
 		}
 	}
+}
+
+query_single :: (tree: *BoundingTree($T), aabb: AABB3) -> T, bool {
+    for data: query(tree, aabb) {
+        return data, true;
+    }
+
+    empty: T;
+    return empty, false;
 }
 
 // query :: inline (tree: *BoundingTree($T), aabb: AABB3, $callback: (value: T) -> bool) {
